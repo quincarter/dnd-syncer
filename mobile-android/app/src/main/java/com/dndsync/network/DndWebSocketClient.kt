@@ -14,18 +14,23 @@ import java.util.concurrent.TimeUnit
 
 class DndWebSocketClient(
     private val app: DndSyncApplication,
+    var host: String,
+    var port: Int = 47890,
+    var desktopId: String? = null,
+    var desktopName: String = "Desktop PC",
+    var sessionToken: String? = null,
     private val listener: MessageListener
 ) {
     interface MessageListener {
-        fun onConnected()
-        fun onDisconnected()
-        fun onConnectionError(reason: String)
-        fun onPairingSuccess(sessionToken: String)
-        fun onPairingFailed(error: String)
-        fun onSetDndRequested(enabled: Boolean, mode: DndMode)
-        fun onDismissNotificationRequested(notificationId: String, packageName: String)
-        fun onSendReplyRequested(notificationId: String, actionId: String, packageName: String, text: String)
-        fun onSyncAllRequested()
+        fun onConnected(client: DndWebSocketClient)
+        fun onDisconnected(client: DndWebSocketClient)
+        fun onConnectionError(client: DndWebSocketClient, reason: String)
+        fun onPairingSuccess(client: DndWebSocketClient, sessionToken: String, desktopDeviceId: String)
+        fun onPairingFailed(client: DndWebSocketClient, error: String)
+        fun onSetDndRequested(client: DndWebSocketClient, enabled: Boolean, mode: DndMode)
+        fun onDismissNotificationRequested(client: DndWebSocketClient, notificationId: String, packageName: String)
+        fun onSendReplyRequested(client: DndWebSocketClient, notificationId: String, actionId: String, packageName: String, text: String)
+        fun onSyncAllRequested(client: DndWebSocketClient)
     }
 
     private val gson = Gson()
@@ -36,25 +41,14 @@ class DndWebSocketClient(
         .build()
 
     private var webSocket: WebSocket? = null
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected
 
-    private var currentHost: String? = null
-    private var currentPort: Int = 47890
     var pendingPin: String? = null
         private set
 
-    fun connect(rawHost: String, defaultPort: Int = 47890) {
-        val (host, port) = cleanHostAndPort(rawHost, defaultPort)
-        if (host.isBlank()) {
-            listener.onConnectionError("Invalid IP or hostname")
-            return
-        }
-
-        currentHost = host
-        currentPort = port
+    fun connect() {
         disconnect()
 
         val url = "ws://$host:$port"
@@ -69,15 +63,15 @@ class DndWebSocketClient(
                 override fun onOpen(ws: WebSocket, response: Response) {
                     Log.d(TAG, "WebSocket Opened to $url")
                     _isConnected.value = true
-                    listener.onConnected()
+                    listener.onConnected(this@DndWebSocketClient)
 
                     val pin = pendingPin
                     if (pin != null) {
                         pairWithPin(pin)
                     } else {
-                        val sessionToken = app.prefs.getString("session_token", null)
-                        if (sessionToken != null) {
-                            sendAuthRequest(sessionToken)
+                        val token = sessionToken
+                        if (token != null) {
+                            sendAuthRequest(token)
                         }
                     }
                 }
@@ -89,19 +83,19 @@ class DndWebSocketClient(
                 override fun onClosing(ws: WebSocket, code: Int, reason: String) {
                     Log.d(TAG, "WebSocket Closing: $code $reason")
                     _isConnected.value = false
-                    listener.onDisconnected()
+                    listener.onDisconnected(this@DndWebSocketClient)
                 }
 
                 override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                     Log.e(TAG, "WebSocket Failure to $url: ${t.message}")
                     _isConnected.value = false
-                    listener.onConnectionError(t.message ?: "Connection to $host:$port failed")
+                    listener.onConnectionError(this@DndWebSocketClient, t.message ?: "Connection to $host:$port failed")
                 }
             })
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create WebSocket request for $url", e)
             _isConnected.value = false
-            listener.onConnectionError("Invalid host/port: ${e.message}")
+            listener.onConnectionError(this@DndWebSocketClient, "Invalid host/port: ${e.message}")
         }
     }
 
@@ -114,7 +108,7 @@ class DndWebSocketClient(
     fun pairWithPin(pin: String) {
         pendingPin = pin
         if (!_isConnected.value) {
-            Log.d(TAG, "Not connected yet, queued pairing PIN: $pin")
+            Log.d(TAG, "Not connected yet, queued pairing PIN: $pin for $host:$port")
             return
         }
         val deviceInfo = DeviceInfo(
@@ -138,7 +132,7 @@ class DndWebSocketClient(
         send(gson.toJson(msg))
     }
 
-    private fun sendAuthRequest(token: String) {
+    fun sendAuthRequest(token: String) {
         val msg = SyncMessage(
             id = UUID.randomUUID().toString(),
             type = "AUTH_REQUEST",
@@ -222,30 +216,34 @@ class DndWebSocketClient(
                 "PAIR_RESPONSE" -> {
                     val resp = gson.fromJson(payloadObj, PairingResponsePayload::class.java)
                     if (resp.success && resp.sessionToken != null) {
-                        app.prefs.edit().putString("session_token", resp.sessionToken).apply()
-                        listener.onPairingSuccess(resp.sessionToken)
+                        pendingPin = null
+                        sessionToken = resp.sessionToken
+                        if (resp.deviceId != null) {
+                            desktopId = resp.deviceId
+                        }
+                        listener.onPairingSuccess(this, resp.sessionToken, resp.deviceId ?: host)
                     } else {
-                        listener.onPairingFailed(resp.errorMessage ?: "Pairing failed")
+                        listener.onPairingFailed(this, resp.errorMessage ?: "Pairing failed")
                     }
                 }
                 "SET_DND_REQUEST" -> {
                     val req = gson.fromJson(payloadObj, SetDndPayload::class.java)
-                    listener.onSetDndRequested(req.enabled, req.mode)
+                    listener.onSetDndRequested(this, req.enabled, req.mode)
                 }
                 "DISMISS_NOTIFICATION" -> {
                     val req = gson.fromJson(payloadObj, DismissNotificationPayload::class.java)
-                    listener.onDismissNotificationRequested(req.notificationId, req.packageName)
+                    listener.onDismissNotificationRequested(this, req.notificationId, req.packageName)
                 }
                 "SEND_NOTIFICATION_REPLY" -> {
                     val req = gson.fromJson(payloadObj, SendReplyPayload::class.java)
-                    listener.onSendReplyRequested(req.notificationId, req.actionId, req.packageName, req.replyText)
+                    listener.onSendReplyRequested(this, req.notificationId, req.actionId, req.packageName, req.replyText)
                 }
                 "SYNC_ALL_NOTIFICATIONS_REQUEST" -> {
-                    listener.onSyncAllRequested()
+                    listener.onSyncAllRequested(this)
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse message: $text", e)
+            Log.e(TAG, "Failed to parse message from $host: $text", e)
         }
     }
 

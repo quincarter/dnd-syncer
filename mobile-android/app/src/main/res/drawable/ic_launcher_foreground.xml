@@ -5,13 +5,17 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:scaleX="2.5"
-        android:scaleY="2.5"
-        android:translateX="24.0"
-        android:translateY="24.0">
-        <!-- Do Not Disturb / Focus Mode Symbol -->
+        android:scaleX="2.8"
+        android:scaleY="2.8"
+        android:translateX="20.4"
+        android:translateY="20.4">
+        <!-- Sync Rotating Arrows Loop -->
         <path
-            android:fillColor="#89B4FA"
-            android:pathData="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M6,11H18V13H6V11Z" />
+            android:fillColor="#FFFFFF"
+            android:pathData="M12,4V1L8,5l4,4V6c3.31,0 6,2.69 6,6 0,1.01 -0.25,1.97 -0.7,2.8l1.46,1.46C19.54,15.03 20,13.57 20,12c0,-4.42 -3.58,-8 -8,-8zm0,14c-3.31,0 -6,-2.69 -6,-6 0,-1.01 0.25,-1.97 0.7,-2.8L5.24,7.74C4.46,8.97 4,10.43 4,12c0,4.42 3.58,8 8,8v3l4,-4 -4,-4v3z" />
+        <!-- Center Crescent Moon (DND) -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M12.3,7.5a4.5,4.5 0 0,0 -0.85,0.08 3.6,3.6 0 1,1 4.24,4.24A4.5,4.5 0 0,0 12.3,7.5z" />
     </group>
 </vector>

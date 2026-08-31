@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -32,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import com.dndsync.DndSyncApplication
 import com.dndsync.model.DndMode
+import com.dndsync.model.PairedDesktop
+import com.dndsync.network.DiscoveryClient
 import com.dndsync.service.DndNotificationListenerService
 import com.dndsync.service.DndSyncForegroundService
 import com.dndsync.ui.theme.DndSyncerTheme
@@ -64,11 +67,9 @@ fun MainScreen() {
     var hasDndPermission by remember { mutableStateOf(checkDndPermission(context)) }
     var hasBatteryExemption by remember { mutableStateOf(checkBatteryOptimization(context)) }
 
+    var manualIpInput by remember { mutableStateOf("") }
     var pairingPinInput by remember { mutableStateOf("") }
-    var manualIpInput by remember {
-        mutableStateOf(DndSyncApplication.instance.prefs.getString("last_host", "") ?: "")
-    }
-    var showManualConnectDialog by remember { mutableStateOf(false) }
+    var showPairDialog by remember { mutableStateOf(false) }
 
     val allPermissionsGranted = hasNotifListenerPermission && hasDndPermission
     var permissionsExpanded by remember { mutableStateOf(!allPermissionsGranted) }
@@ -90,9 +91,17 @@ fun MainScreen() {
         }
     }
 
-    val connectionState by (DndSyncForegroundService.instance?.connectionState
-        ?: remember { kotlinx.coroutines.flow.MutableStateFlow(DndSyncForegroundService.ConnectionState.Disconnected) }
+    val pairedDesktops by (DndSyncForegroundService.instance?.pairedDesktops
+        ?: remember { kotlinx.coroutines.flow.MutableStateFlow(emptyList()) }
     ).collectAsState()
+
+    val discoveredDesktops by (DndSyncForegroundService.instance?.discoveredDesktops
+        ?: remember { kotlinx.coroutines.flow.MutableStateFlow(emptyList()) }
+    ).collectAsState()
+
+    val unpairedDiscovered = discoveredDesktops.filter { disc ->
+        pairedDesktops.none { it.deviceId == disc.deviceId || it.host == disc.ipAddress }
+    }
 
     Column(
         modifier = Modifier
@@ -268,125 +277,136 @@ fun MainScreen() {
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        // Discovered Devices on Wi-Fi Section
+        if (unpairedDiscovered.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "DISCOVERED ON WI-FI (${unpairedDiscovered.size})",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF38BDF8),
+                letterSpacing = 1.sp
+            )
+            Spacer(modifier = Modifier.height(10.dp))
 
-        // Live Sync Status Card
-        val (statusDotColor, statusTitle, statusSubtitle) = when (val state = connectionState) {
-            is DndSyncForegroundService.ConnectionState.Paired -> Triple(
-                Color(0xFF10B981),
-                "Paired & Synced",
-                "Connected with ${state.desktopName}. Focus and notifications are actively synchronized."
-            )
-            is DndSyncForegroundService.ConnectionState.Connected -> Triple(
-                Color(0xFF3B82F6),
-                "Connected to Desktop",
-                "WebSocket connection active. Enter the 6-digit PIN from desktop to complete pairing."
-            )
-            is DndSyncForegroundService.ConnectionState.Connecting -> Triple(
-                Color(0xFFF59E0B),
-                "Connecting to Desktop...",
-                "Attempting connection to ${state.target}..."
-            )
-            is DndSyncForegroundService.ConnectionState.Searching -> Triple(
-                Color(0xFFF59E0B),
-                "Searching for Desktop on Wi-Fi",
-                "Discovering via UDP broadcast. If searching takes long, tap 'Connect to Desktop IP Manually' below."
-            )
-            is DndSyncForegroundService.ConnectionState.Error -> Triple(
-                Color(0xFFEF4444),
-                "Connection Failed",
-                "${state.message}. Check your desktop IP and ensure DND Syncer desktop app is running."
-            )
-            is DndSyncForegroundService.ConnectionState.Disconnected -> Triple(
-                Color(0xFF64748B),
-                "Disconnected from Desktop",
-                "Open the desktop app on the same Wi-Fi, or enter your desktop IP address below to connect."
-            )
-        }
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
-        ) {
-            Column(modifier = Modifier.padding(18.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .background(statusDotColor, CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = statusTitle,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            )
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = statusSubtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF94A3B8),
-                        lineHeight = 18.sp
-                    )
-                )
-
-                if (connectionState !is DndSyncForegroundService.ConnectionState.Paired) {
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Enter PIN to pair
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedTextField(
-                            value = pairingPinInput,
-                            onValueChange = { if (it.length <= 6) pairingPinInput = it.filter { c -> c.isDigit() } },
-                            label = { Text("6-Digit PIN from Desktop") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF6366F1),
-                                unfocusedBorderColor = Color(0xFF334155),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Button(
-                            onClick = {
-                                if (pairingPinInput.isNotBlank()) {
-                                    val intent = Intent(context, DndSyncForegroundService::class.java).apply {
-                                        action = DndSyncForegroundService.ACTION_PAIR_PIN
-                                        putExtra("pin", pairingPinInput.trim())
-                                    }
-                                    context.startService(intent)
-                                    android.widget.Toast.makeText(context, "Sending pairing PIN...", android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
-                        ) {
-                            Text("Pair")
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                unpairedDiscovered.forEach { discovered ->
+                    DiscoveredDesktopCard(
+                        discovered = discovered,
+                        onPair = { pin ->
+                            val intent = Intent(context, DndSyncForegroundService::class.java).apply {
+                                action = DndSyncForegroundService.ACTION_CONNECT_MANUAL
+                                putExtra("host", discovered.ipAddress)
+                                putExtra("pin", pin)
+                            }
+                            context.startService(intent)
+                            Toast.makeText(context, "Pairing with ${discovered.deviceName}...", Toast.LENGTH_SHORT).show()
                         }
-                    }
+                    )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        // Quick Controls
+        // Paired Desktops Section Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "PAIRED COMPUTERS (${pairedDesktops.size})",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF818CF8),
+                letterSpacing = 1.sp
+            )
+
+            TextButton(
+                onClick = { showPairDialog = true },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    tint = Color(0xFF818CF8),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Pair by IP",
+                    fontSize = 12.sp,
+                    color = Color(0xFF818CF8),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Paired Desktops List
+        if (pairedDesktops.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Computer,
+                        contentDescription = null,
+                        tint = Color(0xFF64748B),
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "No Computers Paired Yet",
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        fontSize = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Open DND Syncer on your computers. Discovered computers on Wi-Fi will appear automatically above.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF94A3B8),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { showPairDialog = true },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+                    ) {
+                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Pair Manually by IP")
+                    }
+                }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                pairedDesktops.forEach { desktop ->
+                    PairedDesktopCard(
+                        desktop = desktop,
+                        onUnpair = {
+                            DndSyncForegroundService.instance?.unpairDesktop(desktop.deviceId)
+                            Toast.makeText(context, "Unpaired ${desktop.deviceName}", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Quick Controls Section
         Text(
             text = "QUICK ACTIONS",
             fontSize = 12.sp,
@@ -416,37 +436,60 @@ fun MainScreen() {
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Manual IP Connect Button
+        // Manual Pair Button
         OutlinedButton(
-            onClick = { showManualConnectDialog = true },
+            onClick = { showPairDialog = true },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp)
         ) {
-            Icon(imageVector = Icons.Default.Computer, contentDescription = null)
+            Icon(imageVector = Icons.Default.AddLink, contentDescription = null)
             Spacer(modifier = Modifier.width(10.dp))
-            Text("Connect to Desktop IP Manually")
+            Text("Pair Another Computer by IP")
         }
 
         Spacer(modifier = Modifier.height(28.dp))
     }
 
-    // Manual Connect Dialog
-    if (showManualConnectDialog) {
+    // Pair New Desktop Dialog
+    if (showPairDialog) {
         AlertDialog(
-            onDismissRequest = { showManualConnectDialog = false },
-            title = { Text("Connect by Desktop IP") },
+            onDismissRequest = { showPairDialog = false },
+            title = { Text("Pair Computer") },
             text = {
                 Column {
                     Text(
-                        "Enter the local IP address of your Mac shown in the desktop pairing modal (e.g. 192.168.1.50):",
+                        "Enter the IP Address and 6-Digit PIN shown in the desktop pairing modal:",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF94A3B8)
                     )
+                    if (unpairedDiscovered.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Discovered Nearby:", fontSize = 11.sp, color = Color(0xFF818CF8), fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            unpairedDiscovered.forEach { disc ->
+                                SuggestionChip(
+                                    onClick = { manualIpInput = disc.ipAddress },
+                                    label = { Text("${disc.deviceName} (${disc.ipAddress})", fontSize = 11.sp) }
+                                )
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
                         value = manualIpInput,
                         onValueChange = { manualIpInput = it },
-                        placeholder = { Text("192.168.1.50") },
+                        label = { Text("Computer IP Address") },
+                        placeholder = { Text("192.168.86.64") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = pairingPinInput,
+                        onValueChange = { if (it.length <= 6) pairingPinInput = it.filter { c -> c.isDigit() } },
+                        label = { Text("6-Digit Pairing PIN") },
+                        placeholder = { Text("123456") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -455,26 +498,165 @@ fun MainScreen() {
             confirmButton = {
                 Button(
                     onClick = {
-                        if (manualIpInput.isNotBlank()) {
+                        if (manualIpInput.isNotBlank() && pairingPinInput.isNotBlank()) {
                             val intent = Intent(context, DndSyncForegroundService::class.java).apply {
                                 action = DndSyncForegroundService.ACTION_CONNECT_MANUAL
                                 putExtra("host", manualIpInput.trim())
+                                putExtra("pin", pairingPinInput.trim())
                             }
                             context.startService(intent)
-                            android.widget.Toast.makeText(context, "Connecting to ${manualIpInput.trim()}...", android.widget.Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Pairing with ${manualIpInput.trim()}...", Toast.LENGTH_SHORT).show()
+                            showPairDialog = false
+                            pairingPinInput = ""
+                        } else {
+                            Toast.makeText(context, "Please enter both IP and 6-digit PIN", Toast.LENGTH_SHORT).show()
                         }
-                        showManualConnectDialog = false
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
                 ) {
-                    Text("Connect")
+                    Text("Pair")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showManualConnectDialog = false }) {
+                TextButton(onClick = { showPairDialog = false }) {
                     Text("Cancel")
                 }
             }
         )
+    }
+}
+
+@Composable
+fun DiscoveredDesktopCard(
+    discovered: DiscoveryClient.DiscoveredDesktop,
+    onPair: (pin: String) -> Unit
+) {
+    var pinInput by remember { mutableStateOf("") }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(Color(0xFF38BDF8), CircleShape)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = discovered.deviceName,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "${discovered.ipAddress}:${discovered.wsPort} · Ready to pair",
+                        fontSize = 12.sp,
+                        color = Color(0xFF38BDF8)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = pinInput,
+                    onValueChange = { if (it.length <= 6) pinInput = it.filter { c -> c.isDigit() } },
+                    label = { Text("6-Digit PIN") },
+                    placeholder = { Text("123456") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF38BDF8),
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Button(
+                    onClick = {
+                        if (pinInput.isNotBlank()) {
+                            onPair(pinInput.trim())
+                            pinInput = ""
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8))
+                ) {
+                    Text("Pair", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PairedDesktopCard(
+    desktop: PairedDesktop,
+    onUnpair: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(
+                            if (desktop.isOnline) Color(0xFF10B981) else Color(0xFF64748B),
+                            CircleShape
+                        )
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = desktop.deviceName,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${desktop.host}:${desktop.port} · ${if (desktop.isOnline) "Connected & Synced" else "Reconnecting..."}",
+                        fontSize = 12.sp,
+                        color = if (desktop.isOnline) Color(0xFF10B981) else Color(0xFF94A3B8)
+                    )
+                }
+            }
+
+            IconButton(onClick = onUnpair) {
+                Icon(
+                    imageVector = Icons.Default.DeleteOutline,
+                    contentDescription = "Unpair",
+                    tint = Color(0xFF64748B),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
     }
 }
 

@@ -89,8 +89,11 @@ pub async fn get_state(state: State<'_, AppState>) -> Result<AppStateResponse, S
 #[tauri::command]
 pub async fn regenerate_pin(state: State<'_, AppState>) -> Result<String, String> {
     let new_pin = format!("{:06}", rand::random::<u32>() % 1_000_000);
-    let mut guard = state.pairing_pin.write().await;
-    *guard = new_pin.clone();
+    {
+        let mut guard = state.pairing_pin.write().await;
+        *guard = new_pin.clone();
+    }
+    state.save_persistent_state().await;
     state.emit_frontend_event("pin_changed", &new_pin).await;
     Ok(new_pin)
 }
@@ -220,20 +223,27 @@ pub async fn trigger_notification_action(
 
 #[tauri::command]
 pub async fn unpair_device(device_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let mut paired = state.paired_devices.write().await;
-    paired.remove(&device_id);
+    {
+        let mut paired = state.paired_devices.write().await;
+        paired.remove(&device_id);
+    }
+    {
+        let mut conns = state.active_connections.write().await;
+        conns.remove(&device_id);
+    }
 
-    let mut conns = state.active_connections.write().await;
-    conns.remove(&device_id);
-
+    state.save_persistent_state().await;
     state.emit_frontend_event("device_unpaired", device_id).await;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn update_settings(settings: AppSettings, state: State<'_, AppState>) -> Result<(), String> {
-    let mut s = state.settings.write().await;
-    *s = settings.clone();
+    {
+        let mut s = state.settings.write().await;
+        *s = settings.clone();
+    }
+    state.save_persistent_state().await;
     state.emit_frontend_event("settings_changed", settings).await;
     Ok(())
 }

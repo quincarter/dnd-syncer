@@ -3,6 +3,7 @@ pub mod os;
 pub mod network;
 pub mod state;
 pub mod commands;
+pub mod storage;
 
 use state::AppState;
 use network::discovery::DiscoveryService;

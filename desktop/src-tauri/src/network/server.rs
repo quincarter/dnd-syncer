@@ -135,8 +135,11 @@ async fn handle_sync_message(
                         last_seen_at: chrono::Utc::now().timestamp_millis(),
                     };
 
-                    let mut paired_guard = state.paired_devices.write().await;
-                    paired_guard.insert(req.device_info.device_id.clone(), paired.clone());
+                    {
+                        let mut paired_guard = state.paired_devices.write().await;
+                        paired_guard.insert(req.device_info.device_id.clone(), paired.clone());
+                    }
+                    state.save_persistent_state().await;
 
                     let mut conns = state.active_connections.write().await;
                     conns.insert(req.device_info.device_id.clone(), tx.clone());

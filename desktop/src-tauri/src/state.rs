@@ -34,25 +34,37 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let hostname = hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "Desktop PC".to_string());
-
-        let pin = format!("{:06}", rand::random::<u32>() % 1_000_000);
+        let config = crate::storage::load_config();
 
         Self {
-            device_id: uuid::Uuid::new_v4().to_string(),
-            device_name: hostname,
-            pairing_pin: Arc::new(RwLock::new(pin)),
-            paired_devices: Arc::new(RwLock::new(HashMap::new())),
+            device_id: config.device_id,
+            device_name: config.device_name,
+            pairing_pin: Arc::new(RwLock::new(config.pairing_pin)),
+            paired_devices: Arc::new(RwLock::new(config.paired_devices)),
             active_connections: Arc::new(RwLock::new(HashMap::new())),
             active_notifications: Arc::new(RwLock::new(Vec::new())),
             phone_dnd_status: Arc::new(RwLock::new(None)),
             desktop_dnd_status: Arc::new(RwLock::new(false)),
             last_toggled_at: Arc::new(RwLock::new(None)),
-            settings: Arc::new(RwLock::new(AppSettings::default())),
+            settings: Arc::new(RwLock::new(config.settings)),
             app_handle: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub async fn save_persistent_state(&self) {
+        let pin = self.pairing_pin.read().await.clone();
+        let settings = self.settings.read().await.clone();
+        let paired = self.paired_devices.read().await.clone();
+
+        let cfg = crate::storage::PersistentConfig {
+            device_id: self.device_id.clone(),
+            device_name: self.device_name.clone(),
+            pairing_pin: pin,
+            settings,
+            paired_devices: paired,
+        };
+
+        crate::storage::save_config(&cfg);
     }
 
     pub async fn set_app_handle(&self, handle: AppHandle) {
