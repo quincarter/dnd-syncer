@@ -1,0 +1,74 @@
+[tools]
+node = "22"
+pnpm = "latest"
+rust = "stable"
+java = "temurin-17"
+gradle = "8.13"
+
+[tasks."install"]
+description = "Install desktop dependencies"
+dir = "desktop"
+run = "pnpm install"
+
+[tasks."dev"]
+description = "Run desktop application in development mode (Tauri + React)"
+dir = "desktop"
+run = "pnpm run tauri dev"
+
+[tasks."dev:web"]
+description = "Run desktop frontend in browser-only mode"
+dir = "desktop"
+run = "pnpm run dev"
+
+[tasks."build"]
+description = "Build all desktop and Android artifacts"
+depends = ["build:desktop", "build:android"]
+
+[tasks."build:desktop"]
+description = "Build desktop release bundle (macOS .dmg / Windows .msi / Linux .deb)"
+dir = "desktop"
+run = "pnpm run tauri build"
+
+[tasks."build:android"]
+description = "Build Android debug APK"
+dir = "mobile-android"
+run = "gradle assembleDebug --stacktrace"
+
+[tasks."build:android-release"]
+description = "Build Android release APK"
+dir = "mobile-android"
+run = "gradle assembleRelease"
+
+[tasks."test"]
+description = "Run all tests across desktop and Android"
+depends = ["test:desktop", "test:android"]
+
+[tasks."test:desktop"]
+description = "Run desktop unit and integration tests (Vitest)"
+dir = "desktop"
+run = "pnpm run test"
+
+[tasks."test:android"]
+description = "Run Android unit tests"
+dir = "mobile-android"
+run = "gradle test"
+
+[tasks."lint"]
+description = "Run typecheck and linters across desktop and Android"
+depends = ["lint:desktop", "lint:android"]
+
+[tasks."lint:desktop"]
+description = "Run TypeScript type check on desktop codebase"
+dir = "desktop"
+run = "pnpm run lint"
+
+[tasks."lint:android"]
+description = "Run Android Lint checks"
+dir = "mobile-android"
+run = "gradle lint"
+
+[tasks."android:install"]
+description = "Build and install the debug APK to a connected Android device via ADB"
+depends = ["build:android"]
+dir = "mobile-android"
+run = "adb install -r app/build/outputs/apk/debug/app-debug.apk"

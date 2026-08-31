@@ -11,6 +11,7 @@ export function App() {
     deviceId,
     deviceName,
     pairingPin,
+    localIp,
     pairedDevices,
     activeDeviceIds,
     notifications,
@@ -88,6 +89,7 @@ export function App() {
         deviceId={deviceId}
         deviceName={deviceName}
         pairingPin={pairingPin}
+        localIp={localIp}
         pairedDevices={pairedDevices}
         activeDeviceIds={activeDeviceIds}
         onRegeneratePin={regeneratePin}

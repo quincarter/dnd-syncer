@@ -13,6 +13,7 @@ pub struct DiscoveryBeacon {
     pub device_id: String,
     pub device_name: String,
     pub device_type: String,
+    pub host: Option<String>,
     pub ws_port: u16,
     pub protocol_version: String,
 }
@@ -34,6 +35,9 @@ impl DiscoveryService {
 
     /// Run the discovery broadcaster and listener in the background
     pub async fn start(self) {
+        let local_ip = local_ip_address::local_ip().ok();
+        let local_ip_str = local_ip.as_ref().map(|ip| ip.to_string());
+
         let broadcast_beacon = DiscoveryBeacon {
             magic: "DND_SYNC_BEACON".to_string(),
             device_id: self.device_id.clone(),
@@ -45,6 +49,7 @@ impl DiscoveryService {
             } else {
                 "linux"
             }.to_string(),
+            host: local_ip_str,
             ws_port: self.ws_port,
             protocol_version: "1.0.0".to_string(),
         };
@@ -63,14 +68,22 @@ impl DiscoveryService {
                 warn!("Failed to set UDP broadcast flag: {}", e);
             }
 
-            let broadcast_target: SocketAddr = "255.255.255.255:47891".parse().unwrap();
-            let payload = serde_json::to_vec(&broadcast_beacon).unwrap_or_default();
+            let mut targets: Vec<SocketAddr> = vec!["255.255.255.255:47891".parse().unwrap()];
+            if let Some(std::net::IpAddr::V4(v4)) = local_ip {
+                let octets = v4.octets();
+                if let Ok(subnet_bcast) = format!("{}.{}.{}.255:47891", octets[0], octets[1], octets[2]).parse() {
+                    targets.push(subnet_bcast);
+                }
+            }
 
-            info!("Starting LAN Discovery beacon broadcast on UDP port 47891");
+            let payload = serde_json::to_vec(&broadcast_beacon).unwrap_or_default();
+            info!("Starting LAN Discovery beacon broadcast on UDP port 47891 to {:?}", targets);
 
             loop {
-                let _ = socket.send_to(&payload, broadcast_target).await;
-                tokio::time::sleep(Duration::from_secs(3)).await;
+                for target in &targets {
+                    let _ = socket.send_to(&payload, target).await;
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         });
     }

@@ -9,6 +9,7 @@ interface PairingModalProps {
   deviceId: string;
   deviceName: string;
   pairingPin: string;
+  localIp?: string | null;
   pairedDevices: PairedDevice[];
   activeDeviceIds: string[];
   onRegeneratePin: () => void;
@@ -21,6 +22,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   deviceId,
   deviceName,
   pairingPin,
+  localIp,
   pairedDevices,
   activeDeviceIds,
   onRegeneratePin,
@@ -32,6 +34,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     magic: "DND_SYNC_PAIR",
     deviceId,
     deviceName,
+    host: localIp || undefined,
     pin: pairingPin,
     port: 47890,
   });
@@ -73,8 +76,13 @@ export const PairingModal: React.FC<PairingModalProps> = ({
               <div className="text-3xl font-mono font-bold tracking-widest text-indigo-400 my-1">
                 {pairingPin}
               </div>
+              {localIp && (
+                <div className="text-xs text-slate-400 mb-2">
+                  Mac IP: <span className="font-mono text-slate-200 bg-slate-800 px-1.5 py-0.5 rounded">{localIp}</span>
+                </div>
+              )}
               <p className="text-xs text-slate-400 mb-3">
-                Scan this QR code in the DND Syncer Android app or enter the 6-digit PIN.
+                Scan this QR code or enter the 6-digit PIN on your phone.
               </p>
               <button
                 onClick={onRegeneratePin}
@@ -89,7 +97,11 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           {/* LAN Discovery Notice */}
           <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-800/40 flex items-center gap-3 text-xs text-indigo-300">
             <Wifi className="w-4 h-4 text-indigo-400 shrink-0" />
-            <span>Make sure both your desktop and Android phone are on the same Wi-Fi network.</span>
+            <span>
+              {localIp
+                ? `Desktop listening on Wi-Fi IP: ${localIp}:47890`
+                : "Make sure both your desktop and Android phone are on the same Wi-Fi network."}
+            </span>
           </div>
 
           {/* Paired Devices List */}

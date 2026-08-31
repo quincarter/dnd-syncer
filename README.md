@@ -55,7 +55,37 @@ dnd-syncer/
 
 ## 🚀 Getting Started
 
-### 1. Running the Desktop Application
+### ⚡ Quick Start with `mise` (Recommended)
+
+This repository uses [`mise`](https://mise.jdx.dev) to manage tool versions (`node`, `pnpm`, `rust`, `java`) and run unified build, dev, and test tasks from the root:
+
+```bash
+# 1. Install toolchain runtimes (Node, pnpm, Rust, Java 17)
+mise install
+
+# 2. Install desktop node dependencies
+mise run install
+
+# 3. Development
+mise run dev               # Run desktop Tauri app in development mode
+mise run dev:web           # Run React frontend only in browser
+
+# 4. Building
+mise run build             # Build both Desktop and Android artifacts
+mise run build:desktop     # Build Tauri release bundle (.dmg / .msi / .deb)
+mise run build:android     # Build Android debug APK
+
+# 5. Testing & Verification
+mise run test              # Run tests across all components
+mise run lint              # Run TypeScript typechecks & Android Lint
+
+# 6. Deploy to Phone
+mise run android:install   # Install compiled APK via ADB
+```
+
+---
+
+### 1. Running the Desktop Application (Manual)
 
 #### Prerequisites
 - **Node.js**: v18+ (v24 recommended)
@@ -89,22 +119,38 @@ pnpm run tauri build
 
 ### 2. Running the Android Companion App
 
+> 📖 **New to Android/Gradle?** See the full [Android Build & Setup Guide](mobile-android/README.md) for detailed step-by-step walkthroughs and troubleshooting.
+
 #### Prerequisites
-- **Android Studio** (Koala or newer)
-- **JDK 17+**
-- Android device running **Android 8.0 (API 26) or higher**
+- **Android Device**: Running Android 8.0 (API 26) or higher
+- **Android Studio** (Koala or newer, recommended) or **JDK 17+**
 
-#### Building & Installing
+#### Option A: Quick Run with Android Studio (Recommended - No Gradle knowledge needed)
+1. Open **Android Studio** and select **Open**.
+2. Select the `mobile-android/` folder.
+3. Wait for Android Studio to finish the initial project sync and dependency download.
+4. Connect your Android phone with **USB Debugging** enabled (Settings > Developer Options > USB Debugging).
+5. Select your device in the top toolbar dropdown and click the green **Run (Play)** button ▶️ (`Shift + F10`).
+
+#### Option B: Export Standalone APK from Android Studio
 1. Open the `mobile-android/` folder in Android Studio.
-2. Connect your Android phone via USB debugging or Wi-Fi debugging.
-3. Click **Run 'app'** or run via CLI:
-   ```bash
-   cd mobile-android
-   ./gradlew assembleDebug
-   adb install -r app/build/outputs/apk/debug/app-debug.apk
-   ```
+2. In the top menu, go to **Build > Build Bundle(s) / APK(s) > Build APK(s)**.
+3. Once completed, click the **locate** popup notification to find `app-debug.apk` under `app/build/outputs/apk/debug/`.
+4. Transfer `app-debug.apk` to your phone and tap to install.
 
-#### Setup on Phone:
+#### Option C: Build via Command Line (CLI)
+```bash
+cd mobile-android
+
+# Ensure JDK 17 is in your PATH and Android SDK path is in local.properties
+chmod +x gradlew
+./gradlew assembleDebug
+
+# Install directly to a connected device via ADB
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+#### First-Time Setup on Phone:
 1. Open the **DND Syncer** app.
 2. Grant **Notification Access** (allows reading & dismissing alerts).
 3. Grant **Do Not Disturb Access** (allows reading & setting DND filter).

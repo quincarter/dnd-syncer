@@ -13,6 +13,7 @@ export function useDndSync() {
   const [deviceId, setDeviceId] = useState<string>("desktop-client");
   const [deviceName, setDeviceName] = useState<string>("My Desktop");
   const [pairingPin, setPairingPin] = useState<string>("849201");
+  const [localIp, setLocalIp] = useState<string | null>(null);
   const [pairedDevices, setPairedDevices] = useState<PairedDevice[]>([]);
   const [activeDeviceIds, setActiveDeviceIds] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -37,6 +38,7 @@ export function useDndSync() {
         setDeviceId(state.deviceId);
         setDeviceName(state.deviceName);
         setPairingPin(state.pairingPin);
+        setLocalIp(state.localIp || null);
         setPairedDevices(state.pairedDevices || []);
         setActiveDeviceIds(state.activeDeviceIds || []);
         setNotifications(state.notifications || []);
@@ -228,6 +230,7 @@ export function useDndSync() {
     deviceId,
     deviceName,
     pairingPin,
+    localIp,
     pairedDevices,
     activeDeviceIds,
     notifications,

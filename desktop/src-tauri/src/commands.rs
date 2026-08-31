@@ -14,6 +14,7 @@ pub struct AppStateResponse {
     pub device_id: String,
     pub device_name: String,
     pub pairing_pin: String,
+    pub local_ip: Option<String>,
     pub paired_devices: Vec<PairedDevice>,
     pub active_device_ids: Vec<String>,
     pub notifications: Vec<NotificationItem>,
@@ -68,11 +69,13 @@ pub async fn get_state(state: State<'_, AppState>) -> Result<AppStateResponse, S
     let pin = state.pairing_pin.read().await.clone();
     let settings = state.settings.read().await.clone();
     let full_disk = check_full_disk_access();
+    let local_ip = local_ip_address::local_ip().ok().map(|ip| ip.to_string());
 
     Ok(AppStateResponse {
         device_id: state.device_id.clone(),
         device_name: state.device_name.clone(),
         pairing_pin: pin,
+        local_ip,
         paired_devices: paired,
         active_device_ids: active_ids,
         notifications: notifs,

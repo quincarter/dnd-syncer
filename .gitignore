@@ -4,3 +4,10 @@
 **/.gradle
 **/target
 desktop/dist
+
+# Android build outputs and local configuration
+**/build/
+**/*.hprof
+**/local.properties
+.idea/
+*.iml

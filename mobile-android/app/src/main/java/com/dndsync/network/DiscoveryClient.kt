@@ -33,9 +33,11 @@ class DiscoveryClient(private val context: Context) {
                 acquire()
             }
 
-            socket = DatagramSocket(47891, InetAddress.getByName("0.0.0.0")).apply {
+            socket = DatagramSocket(null).apply {
+                reuseAddress = true
                 broadcast = true
                 soTimeout = timeoutMs
+                bind(java.net.InetSocketAddress(47891))
             }
 
             val buffer = ByteArray(2048)
@@ -49,7 +51,8 @@ class DiscoveryClient(private val context: Context) {
 
             val json = gson.fromJson(jsonString, JsonObject::class.java)
             if (json.has("magic") && json.get("magic").asString == "DND_SYNC_BEACON") {
-                val ip = packet.address.hostAddress ?: "127.0.0.1"
+                val hostFromBeacon = if (json.has("host") && !json.get("host").isJsonNull) json.get("host").asString else null
+                val ip = hostFromBeacon ?: packet.address.hostAddress ?: "127.0.0.1"
                 return@withContext DiscoveredDesktop(
                     deviceId = json.get("deviceId").asString,
                     deviceName = json.get("deviceName").asString,

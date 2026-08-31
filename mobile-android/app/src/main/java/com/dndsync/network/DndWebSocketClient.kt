@@ -19,6 +19,7 @@ class DndWebSocketClient(
     interface MessageListener {
         fun onConnected()
         fun onDisconnected()
+        fun onConnectionError(reason: String)
         fun onPairingSuccess(sessionToken: String)
         fun onPairingFailed(error: String)
         fun onSetDndRequested(enabled: Boolean, mode: DndMode)
@@ -29,6 +30,7 @@ class DndWebSocketClient(
 
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
         .pingInterval(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
@@ -41,46 +43,66 @@ class DndWebSocketClient(
 
     private var currentHost: String? = null
     private var currentPort: Int = 47890
+    var pendingPin: String? = null
+        private set
 
-    fun connect(host: String, port: Int = 47890) {
+    fun connect(rawHost: String, defaultPort: Int = 47890) {
+        val (host, port) = cleanHostAndPort(rawHost, defaultPort)
+        if (host.isBlank()) {
+            listener.onConnectionError("Invalid IP or hostname")
+            return
+        }
+
         currentHost = host
         currentPort = port
         disconnect()
 
-        val request = Request.Builder()
-            .url("ws://$host:$port")
-            .build()
+        val url = "ws://$host:$port"
+        Log.d(TAG, "Attempting WebSocket connection to $url")
 
-        Log.d(TAG, "Connecting to ws://$host:$port")
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(ws: WebSocket, response: Response) {
-                Log.d(TAG, "WebSocket Opened to $host:$port")
-                _isConnected.value = true
-                listener.onConnected()
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .build()
 
-                // Check if session token exists, authenticate or wait for user pairing
-                val sessionToken = app.prefs.getString("session_token", null)
-                if (sessionToken != null) {
-                    sendAuthRequest(sessionToken)
+            webSocket = client.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(ws: WebSocket, response: Response) {
+                    Log.d(TAG, "WebSocket Opened to $url")
+                    _isConnected.value = true
+                    listener.onConnected()
+
+                    val pin = pendingPin
+                    if (pin != null) {
+                        pairWithPin(pin)
+                    } else {
+                        val sessionToken = app.prefs.getString("session_token", null)
+                        if (sessionToken != null) {
+                            sendAuthRequest(sessionToken)
+                        }
+                    }
                 }
-            }
 
-            override fun onMessage(ws: WebSocket, text: String) {
-                handleIncomingMessage(text)
-            }
+                override fun onMessage(ws: WebSocket, text: String) {
+                    handleIncomingMessage(text)
+                }
 
-            override fun onClosing(ws: WebSocket, code: Int, reason: String) {
-                Log.d(TAG, "WebSocket Closing: $code $reason")
-                _isConnected.value = false
-                listener.onDisconnected()
-            }
+                override fun onClosing(ws: WebSocket, code: Int, reason: String) {
+                    Log.d(TAG, "WebSocket Closing: $code $reason")
+                    _isConnected.value = false
+                    listener.onDisconnected()
+                }
 
-            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket Failure: ${t.message}")
-                _isConnected.value = false
-                listener.onDisconnected()
-            }
-        })
+                override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                    Log.e(TAG, "WebSocket Failure to $url: ${t.message}")
+                    _isConnected.value = false
+                    listener.onConnectionError(t.message ?: "Connection to $host:$port failed")
+                }
+            })
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create WebSocket request for $url", e)
+            _isConnected.value = false
+            listener.onConnectionError("Invalid host/port: ${e.message}")
+        }
     }
 
     fun disconnect() {
@@ -90,6 +112,11 @@ class DndWebSocketClient(
     }
 
     fun pairWithPin(pin: String) {
+        pendingPin = pin
+        if (!_isConnected.value) {
+            Log.d(TAG, "Not connected yet, queued pairing PIN: $pin")
+            return
+        }
         val deviceInfo = DeviceInfo(
             deviceId = app.deviceId,
             deviceName = app.deviceName,
@@ -99,7 +126,7 @@ class DndWebSocketClient(
         )
         val payload = PairingRequestPayload(
             deviceInfo = deviceInfo,
-            pin = pin
+            pin = pin.trim()
         )
         val msg = SyncMessage(
             id = UUID.randomUUID().toString(),
@@ -224,5 +251,22 @@ class DndWebSocketClient(
 
     companion object {
         private const val TAG = "DndWebSocketClient"
+
+        fun cleanHostAndPort(rawInput: String, defaultPort: Int = 47890): Pair<String, Int> {
+            var cleaned = rawInput.trim()
+                .removePrefix("ws://")
+                .removePrefix("wss://")
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .trimEnd('/')
+
+            var port = defaultPort
+            if (cleaned.contains(":")) {
+                val parts = cleaned.split(":")
+                cleaned = parts[0].trim()
+                port = parts.getOrNull(1)?.toIntOrNull() ?: defaultPort
+            }
+            return Pair(cleaned, port)
+        }
     }
 }

@@ -32,8 +32,10 @@ class DndSyncForegroundService : Service(), DndWebSocketClient.MessageListener {
     sealed class ConnectionState {
         object Disconnected : ConnectionState()
         object Searching : ConnectionState()
+        data class Connecting(val target: String) : ConnectionState()
         data class Connected(val desktopName: String, val host: String) : ConnectionState()
         data class Paired(val desktopName: String) : ConnectionState()
+        data class Error(val message: String) : ConnectionState()
     }
 
     override fun onCreate() {
@@ -43,6 +45,12 @@ class DndSyncForegroundService : Service(), DndWebSocketClient.MessageListener {
         wsClient = DndWebSocketClient(DndSyncApplication.instance, this)
 
         startForeground(NOTIFICATION_ID, buildForegroundNotification("Waiting for desktop connection..."))
+
+        // Try connecting to last known host if available
+        val lastHost = DndSyncApplication.instance.prefs.getString("last_host", null)
+        if (lastHost != null) {
+            connectToDesktop(lastHost, 47890)
+        }
 
         // Start background discovery and connection loop
         startDiscoveryLoop()
@@ -56,7 +64,7 @@ class DndSyncForegroundService : Service(), DndWebSocketClient.MessageListener {
         if (action == ACTION_CONNECT_MANUAL && host != null) {
             connectToDesktop(host, 47890)
         } else if (action == ACTION_PAIR_PIN && pin != null) {
-            wsClient.pairWithPin(pin)
+            pairWithPin(pin)
         }
 
         return START_STICKY
@@ -75,23 +83,34 @@ class DndSyncForegroundService : Service(), DndWebSocketClient.MessageListener {
         serviceScope.launch {
             while (isActive) {
                 if (!wsClient.isConnected.value) {
-                    _connectionState.value = ConnectionState.Searching
-                    updateNotification("Searching for desktop on Wi-Fi...")
+                    val currentState = _connectionState.value
+                    if (currentState !is ConnectionState.Connecting && currentState !is ConnectionState.Error) {
+                        _connectionState.value = ConnectionState.Searching
+                        updateNotification("Searching for desktop on Wi-Fi...")
+                    }
 
-                    val discovered = discoveryClient.listenForDesktop(timeoutMs = 5000)
+                    val discovered = discoveryClient.listenForDesktop(timeoutMs = 4000)
                     if (discovered != null) {
                         Log.d(TAG, "Discovered Desktop: ${discovered.deviceName} at ${discovered.ipAddress}:${discovered.wsPort}")
                         connectToDesktop(discovered.ipAddress, discovered.wsPort)
                     }
                 }
-                delay(4000)
+                delay(3000)
             }
         }
     }
 
     fun connectToDesktop(host: String, port: Int = 47890) {
+        val (cleanHost, cleanPort) = DndWebSocketClient.cleanHostAndPort(host, port)
+        if (cleanHost.isBlank()) {
+            _connectionState.value = ConnectionState.Error("Please enter a valid IP address")
+            return
+        }
+        DndSyncApplication.instance.prefs.edit().putString("last_host", cleanHost).apply()
+        _connectionState.value = ConnectionState.Connecting("$cleanHost:$cleanPort")
+        updateNotification("Connecting to $cleanHost:$cleanPort...")
         serviceScope.launch {
-            wsClient.connect(host, port)
+            wsClient.connect(cleanHost, cleanPort)
         }
     }
 
@@ -114,15 +133,24 @@ class DndSyncForegroundService : Service(), DndWebSocketClient.MessageListener {
     // WebSocket callbacks
     override fun onConnected() {
         Log.d(TAG, "WebSocket Connected")
-        _connectionState.value = ConnectionState.Connected("Desktop PC", "")
-        updateNotification("Connected to Desktop · Synced")
+        val host = DndSyncApplication.instance.prefs.getString("last_host", "") ?: ""
+        _connectionState.value = ConnectionState.Connected("Desktop PC", host)
+        updateNotification("Connected to Desktop")
         DndNotificationListenerService.instance?.broadcastCurrentDndStatus()
     }
 
     override fun onDisconnected() {
         Log.d(TAG, "WebSocket Disconnected")
-        _connectionState.value = ConnectionState.Disconnected
-        updateNotification("Disconnected from Desktop")
+        if (_connectionState.value !is ConnectionState.Searching && _connectionState.value !is ConnectionState.Connecting) {
+            _connectionState.value = ConnectionState.Disconnected
+            updateNotification("Disconnected from Desktop")
+        }
+    }
+
+    override fun onConnectionError(reason: String) {
+        Log.e(TAG, "WebSocket Connection Error: $reason")
+        _connectionState.value = ConnectionState.Error(reason)
+        updateNotification("Connection failed: $reason")
     }
 
     override fun onPairingSuccess(sessionToken: String) {
@@ -133,6 +161,8 @@ class DndSyncForegroundService : Service(), DndWebSocketClient.MessageListener {
 
     override fun onPairingFailed(error: String) {
         Log.e(TAG, "Pairing failed: $error")
+        val host = DndSyncApplication.instance.prefs.getString("last_host", "") ?: ""
+        _connectionState.value = ConnectionState.Connected("Desktop PC", host)
         updateNotification("Pairing failed: $error")
     }
 
