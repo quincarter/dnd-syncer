@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "productName": "DND Syncer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "com.dndsyncer.desktop",
   "build": {
     "frontendDist": "../dist",
