@@ -65,6 +65,7 @@ impl OsFocusWatcher {
                                 *desk_guard = true;
                             }
                             self.state.emit_frontend_event("desktop_dnd_changed", true).await;
+                            self.state.refresh_tray(true).await;
 
                             let settings = self.state.settings.read().await.clone();
                             if settings.auto_sync_dnd_bidirectional {
@@ -96,6 +97,7 @@ impl OsFocusWatcher {
                                 *desk_guard = false;
                             }
                             self.state.emit_frontend_event("desktop_dnd_changed", false).await;
+                            self.state.refresh_tray(false).await;
 
                             let settings = self.state.settings.read().await.clone();
                             if settings.auto_sync_dnd_bidirectional {

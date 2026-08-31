@@ -169,6 +169,15 @@ async fn handle_sync_message(
                 };
 
                 let _ = tx.send(Message::Text(serde_json::to_string(&resp_msg).unwrap()));
+
+                // Push the desktop's current live DND state so the newly
+                // paired device converges immediately, regardless of how
+                // that state was set (this app's button, the host OS's own
+                // UI, or already in place before pairing happened).
+                if success {
+                    let dnd_msg = state.current_dnd_sync_message();
+                    let _ = tx.send(Message::Text(serde_json::to_string(&dnd_msg).unwrap()));
+                }
             }
         }
 
@@ -206,6 +215,11 @@ async fn handle_sync_message(
                     payload: json!({}),
                 };
                 let _ = tx.send(Message::Text(serde_json::to_string(&sync_req).unwrap()));
+
+                // Same as PairRequest: push current live desktop DND state
+                // immediately on (re)connect.
+                let dnd_msg = state.current_dnd_sync_message();
+                let _ = tx.send(Message::Text(serde_json::to_string(&dnd_msg).unwrap()));
             } else {
                 let auth_resp = SyncMessage {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -233,7 +247,7 @@ async fn handle_sync_message(
 
         MessageType::DndStatusUpdate => {
             if let Ok(dnd_payload) = serde_json::from_value::<DndStatusPayload>(msg.payload.clone()) {
-                state.handle_phone_dnd_update(dnd_payload).await;
+                state.handle_phone_dnd_update(dnd_payload, &msg.sender_id).await;
             }
         }
 
@@ -251,7 +265,7 @@ async fn handle_sync_message(
 
         MessageType::SyncAllNotificationsResponse => {
             if let Ok(payload) = serde_json::from_value::<SyncAllNotificationsPayload>(msg.payload.clone()) {
-                state.handle_phone_dnd_update(payload.dnd_status).await;
+                state.handle_phone_dnd_update(payload.dnd_status, &msg.sender_id).await;
                 for notif in payload.notifications {
                     state.add_notification(notif).await;
                 }

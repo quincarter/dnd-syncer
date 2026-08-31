@@ -3,10 +3,19 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
-use crate::types::{AppSettings, DeviceInfo, DndStatusPayload, NotificationItem, SyncMessage};
-use crate::os::get_os_adapter;
+use tauri::{AppHandle, Emitter, Wry};
+use tauri::menu::MenuItem;
+use tauri::tray::TrayIcon;
+use crate::types::{AppSettings, DeviceInfo, DndMode, DndStatusPayload, MessageType, NotificationItem, SetDndPayload, SyncMessage};
+use crate::os::{get_os_adapter, OsFocusState};
 use log::info;
+
+#[derive(Clone)]
+pub struct TrayHandles {
+    pub tray: TrayIcon<Wry>,
+    pub status_item: MenuItem<Wry>,
+    pub toggle_item: MenuItem<Wry>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +39,7 @@ pub struct AppState {
     pub last_toggled_at: Arc<RwLock<Option<Instant>>>,
     pub settings: Arc<RwLock<AppSettings>>,
     pub app_handle: Arc<RwLock<Option<AppHandle>>>,
+    pub tray: Arc<RwLock<Option<TrayHandles>>>,
 }
 
 impl AppState {
@@ -48,6 +58,7 @@ impl AppState {
             last_toggled_at: Arc::new(RwLock::new(None)),
             settings: Arc::new(RwLock::new(config.settings)),
             app_handle: Arc::new(RwLock::new(None)),
+            tray: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -72,10 +83,55 @@ impl AppState {
         *guard = Some(handle);
     }
 
+    pub async fn set_tray_handles(&self, handles: TrayHandles) {
+        let mut guard = self.tray.write().await;
+        *guard = Some(handles);
+    }
+
+    /// Updates the tray's status line, toggle-item label, and (on Windows)
+    /// hover tooltip to reflect the given Focus state. Called any time
+    /// desktop_dnd_status changes, from whichever source triggered it (this
+    /// app's own button, the host OS's own UI, or a phone-initiated change).
+    pub async fn refresh_tray(&self, enabled: bool) {
+        let status_text = if enabled { "Focus Mode is On" } else { "Focus Mode is Off" };
+        let toggle_text = if enabled { "Turn Focus Off" } else { "Turn Focus On" };
+
+        if let Some(handles) = self.tray.read().await.as_ref() {
+            let _ = handles.status_item.set_text(status_text);
+            let _ = handles.toggle_item.set_text(toggle_text);
+            let _ = handles.tray.set_tooltip(Some(status_text));
+        }
+    }
+
     pub async fn emit_frontend_event<T: Serialize + Clone>(&self, event: &str, payload: T) {
         let guard = self.app_handle.read().await;
         if let Some(ref handle) = *guard {
             let _ = handle.emit(event, payload);
+        }
+    }
+
+    /// Builds a SetDndRequest reflecting the desktop's current live OS focus
+    /// state (not just whatever we last recorded), so a device that just
+    /// connected converges to the truth regardless of whether that state was
+    /// set via this app's own button, the host OS's own UI, or was already
+    /// in place before the app (or that device) even started.
+    pub fn current_dnd_sync_message(&self) -> SyncMessage {
+        let (enabled, mode_name) = match get_os_adapter().get_focus_mode() {
+            OsFocusState::Active { mode_name } => (true, mode_name),
+            _ => (false, None),
+        };
+        let payload = SetDndPayload {
+            mode: if enabled { DndMode::PRIORITY_ONLY } else { DndMode::OFF },
+            mode_name,
+            enabled,
+        };
+        SyncMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            r#type: MessageType::SetDndRequest,
+            sender_id: self.device_id.clone(),
+            target_id: None,
+            timestamp: chrono::Utc::now().timestamp_millis(),
+            payload: serde_json::to_value(payload).unwrap(),
         }
     }
 
@@ -93,19 +149,29 @@ impl AppState {
     }
 
     pub async fn broadcast_message(&self, message: &SyncMessage) {
+        self.broadcast_message_except(message, None).await;
+    }
+
+    /// Broadcasts to every connected device except `exclude_device_id` (the
+    /// device that originated the change), so relaying a state update back
+    /// to its source doesn't create an echo.
+    pub async fn broadcast_message_except(&self, message: &SyncMessage, exclude_device_id: Option<&str>) {
         let json_str = match serde_json::to_string(message) {
             Ok(s) => s,
             Err(_) => return,
         };
 
         let connections = self.active_connections.read().await;
-        for (_id, tx) in connections.iter() {
+        for (id, tx) in connections.iter() {
+            if Some(id.as_str()) == exclude_device_id {
+                continue;
+            }
             let _ = tx.send(tokio_tungstenite::tungstenite::Message::Text(json_str.clone()));
         }
     }
 
     /// Handles incoming DND update from Android phone
-    pub async fn handle_phone_dnd_update(&self, payload: DndStatusPayload) {
+    pub async fn handle_phone_dnd_update(&self, payload: DndStatusPayload, source_device_id: &str) {
         info!("Phone DND updated: mode={:?}, is_enabled={}", payload.mode, payload.is_enabled);
 
         {
@@ -126,6 +192,29 @@ impl AppState {
             let mut desk_guard = self.desktop_dnd_status.write().await;
             *desk_guard = payload.is_enabled;
             self.emit_frontend_event("desktop_dnd_changed", payload.is_enabled).await;
+            self.refresh_tray(payload.is_enabled).await;
+        }
+
+        // Relay to any other connected devices (e.g. a second paired phone)
+        // so every device converges to the same state, not just this desktop.
+        // Gated on the bidirectional-sync setting specifically, since
+        // mute_desktop_when_phone_dnd is a narrower phone->this-desktop-only
+        // preference that shouldn't fan a change out to other devices.
+        if settings.auto_sync_dnd_bidirectional {
+            let relay_payload = SetDndPayload {
+                mode: payload.mode,
+                mode_name: payload.mode_name,
+                enabled: payload.is_enabled,
+            };
+            let relay_msg = SyncMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                r#type: MessageType::SetDndRequest,
+                sender_id: self.device_id.clone(),
+                target_id: None,
+                timestamp: chrono::Utc::now().timestamp_millis(),
+                payload: serde_json::to_value(relay_payload).unwrap(),
+            };
+            self.broadcast_message_except(&relay_msg, Some(source_device_id)).await;
         }
     }
 

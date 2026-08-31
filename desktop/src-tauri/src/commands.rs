@@ -98,8 +98,8 @@ pub async fn regenerate_pin(state: State<'_, AppState>) -> Result<String, String
     Ok(new_pin)
 }
 
-#[tauri::command]
-pub async fn toggle_dnd(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+/// Shared by the frontend's toggle button and the tray menu's toggle item.
+pub async fn apply_toggle_dnd(state: &AppState, enabled: bool) {
     // 1. Broadcast DND change request to connected Android devices
     let dnd_mode = if enabled { DndMode::PRIORITY_ONLY } else { DndMode::OFF };
     let payload = SetDndPayload {
@@ -129,13 +129,18 @@ pub async fn toggle_dnd(enabled: bool, state: State<'_, AppState>) -> Result<(),
         *desk_guard = enabled;
     }
     state.emit_frontend_event("desktop_dnd_changed", enabled).await;
+    state.refresh_tray(enabled).await;
 
     // 3. Run OS Focus change asynchronously in background worker to prevent UI & mouse lag
     tokio::task::spawn_blocking(move || {
         let adapter = get_os_adapter();
         let _ = adapter.set_focus_mode(enabled, None);
     });
+}
 
+#[tauri::command]
+pub async fn toggle_dnd(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    apply_toggle_dnd(&state, enabled).await;
     Ok(())
 }
 
