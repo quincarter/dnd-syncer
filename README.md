@@ -2,6 +2,9 @@
 
 A cross-platform system to synchronize **Do Not Disturb (DND) / Focus Mode** status and **Notifications** in real-time between **Android phones** and **Desktop computers (macOS, Windows, Linux)** over an encrypted local Wi-Fi connection.
 
+<img width="1072" height="792" alt="Screenshot 2026-08-30 at 11 33 54 PM" src="https://github.com/user-attachments/assets/e72dda18-fff5-4ecd-a5dc-fd6aeb24b4d6" />
+
+
 ---
 
 ## 🌟 Features
@@ -130,3 +133,8 @@ Key message types:
 - `DND_STATUS_UPDATE` / `SET_DND_REQUEST`: Focus mode state synchronization.
 - `NOTIFICATION_POSTED` / `NOTIFICATION_REMOVED`: Notification stream mirroring.
 - `DISMISS_NOTIFICATION` / `SEND_NOTIFICATION_REPLY`: Remote interactive controls.
+
+## More Screenshots
+
+<img width="1072" height="792" alt="Screenshot 2026-08-30 at 11 33 18 PM" src="https://github.com/user-attachments/assets/f59891ba-8148-4773-8097-10b7d1018d66" />
+<img width="1072" height="792" alt="Screenshot 2026-08-30 at 11 33 51 PM" src="https://github.com/user-attachments/assets/36b0eb47-ee25-4ba8-bd1e-e74c56d16e07" />
