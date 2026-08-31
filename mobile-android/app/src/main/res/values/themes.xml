@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.DndSyncer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#090D16</item>
+        <item name="android:navigationBarColor">#090D16</item>
+    </style>
+</resources>

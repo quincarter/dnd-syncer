@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">DND Syncer</string>
+    <string name="notification_channel_name">DND Sync Service</string>
+    <string name="notification_channel_desc">Keeps the DND and notification sync active with your desktop</string>
+</resources>
