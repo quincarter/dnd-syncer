@@ -1,6 +1,6 @@
 [tools]
-node = "22"
-pnpm = "latest"
+node = "24"
+pnpm = "11"
 rust = "stable"
 java = "temurin-17"
 gradle = "8.13"
